@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "market": "NQ",
+  "contract": "NQZ6",
+  "futuresPrice": 28720,
+  "asOf": "2026-10-30T18:00:00Z",
+  "source": {
+    "provider": "Synthetic schema example; not market data",
+    "status": "snapshot"
+  },
+  "gexUnit": "illustrative USD per 1% underlying move",
+  "rate": 0,
+  "positionMethod": "Synthetic example only. Dealer ownership is unknown; no inventory or market-impact estimate is provided.",
+  "levels": [
+    {
+      "strike": 28750,
+      "gex": -107840,
+      "iv": 0.2,
+      "expiry": "2026-10-30T20:00:00Z",
+      "exerciseStyle": "european",
+      "modelBasis": "single-series",
+      "optionType": "put",
+      "dealerSide": "unknown",
+      "allowEuropeanApproximation": false,
+      "optionMultiplier": 20,
+      "hedgeMultiplier": 20
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "gex-gravity",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-gamma.mjs",
+    "validate": "node scripts/validate-artifact.mjs",
+    "test": "node --test core/*.test.mjs tests/*.test.mjs frontend/*.test.mjs",
+    "preview": "node scripts/preview-gamma.mjs"
+  }
+}

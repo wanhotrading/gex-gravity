@@ -1,0 +1,11 @@
+{
+  "purpose": "Ordinary software collector for the owner's authorized MenthorQ Exposure Map",
+  "browserExecutable": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "profileDirectory": "../gex-gravity-collector/browser-profile",
+  "debuggingAddress": "127.0.0.1",
+  "debuggingPort": 9337,
+  "initialUrl": "about:blank",
+  "credentials": "User signs in directly in this dedicated profile. No cookies, passwords or provider tokens are exported.",
+  "access": "Playwright connects to the dedicated browser over loopback. Local processes able to reach this port can control this profile.",
+  "status": "Use this layout only for a dedicated profile you control and have approved for this collector."
+}

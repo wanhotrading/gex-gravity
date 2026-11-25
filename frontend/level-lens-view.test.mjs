@@ -1,0 +1,92 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {renderLevelLens} from './level-lens-view.mjs';
+import {analyzeHedgingMarket} from '../core/hedging-engine.mjs';
+test('overall is the default and one click returns from a strike comparison using the current expiry filter',()=>{
+  const asOf='2026-11-10T12:00:00Z',handlers={},root={addEventListener(name,handler){handlers[name]=handler;}};
+  const rows=[85,90].flatMap(strike=>['2026-11-10T19:30:00Z','2026-11-17T19:30:00Z'].map((expiry,index)=>({id:`${strike}-${index}`,strike,expiry,optionType:'call',iv:.5,openInterest:index?30000:100,exerciseStyle:'american'})));
+  const input={market:'CL',contract:'US.CL2612',futuresPrice:85,optionMultiplier:1000,hedgeMultiplier:1000,tickSize:.01,rows};
+  const props={marketName:'comparison-selection-test',now:Date.parse(asOf),input,analysis:analyzeHedgingMarket(input,{asOf}),market:{underlyingCode:input.contract,underlyingPrice:85,priceTimestamp:asOf,tickSize:.01,watchContext:{levels:[{strike:85,labels:['Put Support']}],regime:{netGex:-100,scope:'all-expiries',mode:'Intraday'}}},selected:'85',clusters:[85,90].map(strike=>({key:String(strike),strike,rows:rows.filter(row=>row.strike===strike),level:{labels:[]}}))};
+  props.onSelect=key=>{props.selected=key;renderLevelLens(root,props);};
+  const click=(attribute,dataset={})=>handlers.click({target:{closest:()=>({dataset,hasAttribute:name=>name===attribute})}});
+  renderLevelLens(root,props);
+  assert.match(root.innerHTML,/data-reading-scope="overall"/);
+  assert.match(root.innerHTML,/class="reading-overall-line"/);
+  assert.match(root.innerHTML,/All strikes · Build/);
+  assert.doesNotMatch(root.innerHTML,/data-expiry-comparison/);
+  assert.match(root.innerHTML,/Compare strike 85 expiries/);
+  click('data-compare-toggle',{compareKey:'85'});
+  assert.match(root.innerHTML,/data-reading-scope="strike"/);
+  assert.match(root.innerHTML,/data-compare-strike="85"/);assert.match(root.innerHTML,/Rises → buying · falls → selling/);assert.match(root.innerHTML,/<option value="all" selected>/);
+  click('data-compare-toggle');assert.doesNotMatch(root.innerHTML,/data-expiry-comparison/);
+  handlers['lens-strike-select']({detail:'90'});assert.match(root.innerHTML,/data-compare-strike="90"/);assert.match(root.innerHTML,/data-delta-panel/);assert.match(root.innerHTML,/Rises → buying · falls → selling/);
+  renderLevelLens(root,{...props,now:props.now+60000});assert.match(root.innerHTML,/data-compare-strike="90"/);
+  handlers.change({target:{hasAttribute:()=>false,dataset:{lensField:'expiryScope'},value:'0dte'}});
+  click('data-reading-overall');
+  assert.match(root.innerHTML,/data-reading-scope="overall"/);
+  assert.match(root.innerHTML,/<option value="0dte" selected>/);
+  assert.doesNotMatch(root.innerHTML,/data-expiry-comparison|data-delta-panel/);
+  handlers['lens-strike-select']({detail:'90'});
+  renderLevelLens(root,{...props,replay:{capturedAt:asOf}});
+  assert.match(root.innerHTML,/data-reading-scope="overall"/);
+  assert.doesNotMatch(root.innerHTML,/data-expiry-comparison/);
+});
+
+test('delta overlay appears only after explicit strike selection and follows option, threshold and clock choices',()=>{
+ const asOf='2026-11-10T15:00:00Z',handlers={},root={addEventListener(n,h){handlers[n]=h;}};
+ const rows=[100,105].flatMap(strike=>['call','put'].map(optionType=>({id:`${strike}-${optionType}`,strike,optionType,expiry:'2026-11-10T21:00:00Z',iv:.3,openInterest:1000,exerciseStyle:'european',quoteTimestamp:asOf,underlyingCode:'US.NQ2612',greeksBasis:'futures-price'})));
+ const input={market:'NQ',contract:'US.NQ2612',futuresPrice:100,optionMultiplier:20,hedgeMultiplier:20,rows};
+ const props={marketName:'delta-selection-test',now:Date.parse(asOf),analysis:analyzeHedgingMarket(input,{asOf}),input,market:{underlyingCode:input.contract,underlyingPrice:100,priceTimestamp:asOf},selected:'100',clusters:[100,105].map(strike=>({key:String(strike),strike,rows:rows.filter(r=>r.strike===strike),level:{labels:[]}}))};
+ props.onSelect=key=>{props.selected=key;renderLevelLens(root,props);};
+ const change=(field,value)=>handlers.change({target:{hasAttribute:()=>false,dataset:{lensField:field},value,checkValidity:()=>true}});
+ renderLevelLens(root,props);assert.doesNotMatch(root.innerHTML,/data-delta-panel/);
+ handlers['lens-strike-select']({detail:'100'});
+ assert.match(root.innerHTML,/data-delta-strike="100"/);assert.match(root.innerHTML,/0\.05/);assert.match(root.innerHTML,/One call, one expiry/);
+ change('deltaSeriesId','100-put');assert.match(root.innerHTML,/One put, one expiry/);assert.match(root.innerHTML,/Δ -0\.95/);
+ change('deltaTail','0.01');assert.match(root.innerHTML,/Δ -0\.99/);
+ handlers['lens-strike-select']({detail:'105'});assert.match(root.innerHTML,/data-delta-strike="105"/);assert.doesNotMatch(root.innerHTML,/data-delta-strike="100"/);
+ change('elapsedMinutes','60');assert.match(root.innerHTML,/5 hours remain/);
+ change('elapsedMinutes','360');assert.doesNotMatch(root.innerHTML,/data-delta-strike=/);assert.match(root.innerHTML,/Delta endpoints are unavailable/);
+ handlers.click({target:{closest:()=>({dataset:{},hasAttribute:n=>n==='data-delta-hide'})}});assert.doesNotMatch(root.innerHTML,/data-delta-panel/);
+});
+
+test('0DTE filter changes sensitivity without borrowing all-expiry dealer sign or exposure',()=>{
+ const asOf='2026-11-06T20:00:00Z',handlers={},root={addEventListener(n,h){handlers[n]=h;}};
+ const row={id:'today',strike:100,optionType:'call',expiry:'2026-11-06T21:00:00Z',iv:.3,openInterest:1000,exerciseStyle:'european'};
+ const input={market:'NQ',contract:'US.NQ2612',currency:'USD',futuresPrice:100,optionMultiplier:20,hedgeMultiplier:20,rows:[row,{...row,id:'later',expiry:'2026-11-09T21:00:00Z'}]};
+ const context={underlyingCode:input.contract,sourceDate:'2026-11-06',levels:[{strike:100,labels:['Call Resistance 0DTE']}],regime:{netGex:-100,scope:'all-expiries',mode:'EOD'}};
+ const props={marketName:'dte-ui',now:Date.parse(asOf),analysis:analyzeHedgingMarket(input,{asOf}),input,market:{underlyingCode:input.contract,underlyingPrice:100,priceTimestamp:asOf,watchContext:context},clusters:[{key:'100',strike:100,rows:input.rows,level:context.levels[0]}]};
+ renderLevelLens(root,props);
+ assert.match(root.innerHTML,/Includes 0DTE/);
+ handlers.change({target:{hasAttribute:()=>false,dataset:{lensField:'expiryScope'},value:'0dte'}});
+ assert.match(root.innerHTML,/0DTE contracts/);assert.match(root.innerHTML,/Direction unknown/);
+ assert.match(root.innerHTML,/Add matching same-day Net GEX/);
+ handlers.change({target:{hasAttribute:()=>false,dataset:{lensField:'elapsedMinutes'},value:'60',checkValidity:()=>true}});
+ assert.match(root.innerHTML,/reaches an included expiry/);
+ assert.doesNotMatch(root.innerHTML,/NaN|undefined/);
+});
+test('range draft survives a snapshot render and fit control applies its computed range',()=>{
+ const handlers={},root={addEventListener(name,handler){handlers[name]=handler;}};
+ const props={marketName:'range-test',now:Date.now()};
+ renderLevelLens(root,props);
+ handlers.input({target:{dataset:{lensField:'chartMove'},value:'1250',checkValidity:()=>true}});
+ clearTimeout(root._lensRangeTimer);
+ renderLevelLens(root,{...props,now:props.now+1000});
+ assert.match(root.innerHTML,/aria-label="Chart range step"[^>]*value="1250"/);
+ const button={dataset:{lensRange:'2450'},hasAttribute:()=>false};
+ handlers.click({target:{closest:()=>button}});
+ assert.match(root.innerHTML,/aria-label="Chart range step"[^>]*value="2450"/);
+ handlers.input({target:{dataset:{lensField:'chartMove'},value:'-1',checkValidity:()=>false}});
+ renderLevelLens(root,props);
+ assert.match(root.innerHTML,/aria-label="Chart range step"[^>]*value="2450"/);
+});
+test('empty UI states do not invent a level or flow',()=>{
+ const root={addEventListener(){}};renderLevelLens(root,{marketName:'NQ',now:Date.now()});
+ assert.match(root.innerHTML,/Inputs needed/);assert.match(root.innerHTML,/snapshot are available/);assert.doesNotMatch(root.innerHTML,/NaN|undefined/);
+});
+test('CL displays fractional price moves accurately and labels its local approximation',()=>{
+ const asOf='2026-11-05T15:00:00Z',input={market:'CL',contract:'US.CL2612',currency:'USD',futuresPrice:90,optionMultiplier:1000,hedgeMultiplier:1000,tickSize:.01,rate:0,rows:[{id:'cl',strike:90,optionType:'put',expiry:null,expiryDate:'2026-11-06',expiryTimeZone:'America/New_York',iv:.3,delta:-.5,gamma:.1,openInterest:1000,underlyingCode:'US.CL2612',quoteTimestamp:asOf,greeksBasis:'futures-price'}]};
+ const root={addEventListener(){}},analysis=analyzeHedgingMarket(input,{asOf});
+ renderLevelLens(root,{marketName:'CL',market:{underlyingPrice:90,underlyingCode:input.contract,priceTimestamp:asOf,tickSize:.01},analysis,input,clusters:[{key:'90',strike:90,rows:[{}],level:{labels:['<unsafe>']}}],selected:'90',now:Date.parse(asOf)});
+ assert.match(root.innerHTML,/\+0\.05 pts/);assert.match(root.innerHTML,/Local reported-Gamma approximation/);assert.match(root.innerHTML,/&lt;unsafe&gt;/);assert.doesNotMatch(root.innerHTML,/<unsafe>/);assert.match(root.innerHTML,/exact expiry clocks/i);
+});
