@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 
 let session = 0;
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -30,6 +31,12 @@ async function setup({ lastAttemptAt, inProgress = false, pending = false, pendi
   globalThis.fetch = async (url, options = {}) => {
     requests.push({ url, method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null });
     if (url === '/api/watch-context' && saveMap) return saveMap(JSON.parse(options.body));
+    if (url.startsWith('/api/session-history?')) {
+      const market = new URL(url, 'https://gamma.test').searchParams.get('market');
+      const underlyingCode = state().markets[market]?.underlyingCode;
+      return Response.json({ market, underlyingCode, status: 'history-partial', progress: { done: true },
+        profile: { underlyingCode, asOf: new Date(clock.now).toISOString(), windows: [] } });
+    }
     if (url === '/api/futu/status') {
       if (pendingConnection) await new Promise(resolve => { finishConnection = resolve; });
       return controls.connectionError ? Response.json({ code: 'PRIVATE_STORAGE_UNAVAILABLE' }, { status: 503 }) : Response.json({ connection: statusConnection });
@@ -50,14 +57,14 @@ async function setup({ lastAttemptAt, inProgress = false, pending = false, pendi
   source = source.replace('./level-lens-view.mjs', new URL('./level-lens-view.mjs', import.meta.url).href);
   source = source.replace('./replay-view.mjs', new URL('./replay-view.mjs', import.meta.url).href);
   source = source.replace('./iv-surface-view.mjs', new URL('./iv-surface-view.mjs', import.meta.url).href);
-  source += `\nexport const __state=state; // test session ${session++}`;
+  source += `\nexport { state as __state, sessionState }; // test session ${session++}`;
   const module = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
   elements.get('plan-levels').value = '28750,-107.84K'; module.initMarketWatch(); await settle();
-  return { clock, requests, elements, events, remote, controls, state: module.__state, tick: () => interval(), finish: () => finishPost?.(), finishState: () => finishState?.(), finishConnection: () => finishConnection?.(),
+  return { clock, requests, elements, events, remote, controls, state: module.__state, sessionState: module.sessionState, tick: () => interval(), finish: () => finishPost?.(), finishState: () => finishState?.(), finishConnection: () => finishConnection?.(),
     restore() { Date.now = original.now; globalThis.fetch = original.fetch; globalThis.setInterval = original.interval; globalThis.document = original.document; globalThis.window = original.window; } };
 }
 
-test('the manual shortcut clears old clock fields and saves only exact matching exports', async () => {
+test('the manual shortcut clears old clock fields and saves only exact matching exports', async t => {
   const app = await setup({
     markets: {
       NQ: { underlyingCode: 'US.NQ2612', contracts: [], watchContext: { sourceDate: '2026-11-03', sourceLocalTime: '08:19', levels: [] } },
@@ -68,6 +75,7 @@ test('the manual shortcut clears old clock fields and saves only exact matching 
       ? Response.json({ error: 'Please retry the save.' }, { status: 400 })
       : Response.json({ saved: true, context: { underlyingCode, sourceDate, levels: [] } }),
   });
+  t.after(() => app.restore());
   try {
     const get = id => app.elements.get(id);
     get('watch-open-menthorq-levels').events.click[0]();
@@ -85,8 +93,10 @@ test('the manual shortcut clears old clock fields and saves only exact matching 
     assert.equal(get('watch-context-export').value, exportText);
     assert.equal(get('watch-context-editor').hidden, false);
   } finally {
-    app.restore();
+    const signal = AbortSignal.timeout(5000);
+    while (app.sessionState.loadingKey) await delay(5, undefined, { signal });
   }
+  assert.equal(app.sessionState.histories.get('NQ|US.NQ2612')?.status, 'history-partial');
 });
 
 test('startup checks the connection before showing any authorization action', async () => {
